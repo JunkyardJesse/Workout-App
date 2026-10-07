@@ -6,6 +6,7 @@ A simple single-page workout tracker for iPhone (no build step, no dependencies)
 - Lift screen: progress graph, weight input (lbs), five set boxes
 - Each box counts 0→5 per tap and restarts a rest timer at 0:00; at 3:00 it beeps, vibrates (where supported) and shows a banner
 - All five boxes at 5 saves the weight to history (stored on-device in localStorage)
+- Graph: y axis ticks are multiples of 5 lbs; x axis is a real date axis you can pinch to zoom and drag to pan (Reset zoom button)
 - Weight moves in 5 lb steps (− / + buttons; typed values snap to the nearest 5) and a plate diagram shows plates per side on a 45 lb bar (45, 25, 15, 10, 5, 2.5)
 - Home → "Import / export data": paste `exercise, date, weight` lines to load past workouts, or export a backup
 

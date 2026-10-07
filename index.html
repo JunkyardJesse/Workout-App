@@ -45,7 +45,11 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .top h1 { margin: 0; font-size: 24px; }
 .panel { background: var(--card); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
 .panel h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-#chart { width: 100%; height: 190px; display: block; }
+#chartWrap { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+#chart { display: block; }
+.hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 4px; }
+.panel h2 { display: flex; justify-content: space-between; align-items: center; }
+.zoomreset { background: var(--card2); border: 0; border-radius: 8px; color: var(--text); font-size: 12px; padding: 4px 10px; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
 .weight { display: flex; align-items: center; gap: 10px; }
 .weight input { flex: 1; min-width: 0; background: var(--card2); border: 2px solid transparent; border-radius: 12px;
@@ -110,8 +114,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
   </div>
 
   <div class="panel">
-    <h2>Progress (lbs)</h2>
+    <h2>Progress (lbs) <button class="zoomreset hidden" id="zoomReset">Reset zoom</button></h2>
     <div id="chartWrap"></div>
+    <div class="hint" id="chartHint">Pinch to zoom · drag to pan</div>
   </div>
 
   <div class="panel">
@@ -236,33 +241,105 @@ textarea:focus { outline: none; border-color: var(--accent); }
     });
   }
 
-  /* ---------- chart (inline SVG) ---------- */
-  function renderChart(name) {
+  /* ---------- chart (inline SVG, time axis, pinch/drag) ---------- */
+  var DAY = 864e5, MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var chartName = null, full = null, view = null, CH = { H: 190, pl: 38, pr: 14, pt: 12, pb: 26 };
+  function toT(d) { var m = d.split("-"); return Date.UTC(+m[0], +m[1] - 1, +m[2]); }
+  function xLabel(t, long) {
+    var d = new Date(t);
+    return long ? MONTHS[d.getUTCMonth()] + " ’" + String(d.getUTCFullYear()).slice(2) : MONTHS[d.getUTCMonth()] + " " + d.getUTCDate();
+  }
+  function plotW() { return Math.max(100, $("chartWrap").clientWidth); }
+  function clampView(a, span) {
+    var fs = full.b - full.a, minSpan = Math.min(7 * DAY, fs);
+    span = Math.min(Math.max(span, minSpan), fs);
+    a = Math.min(Math.max(a, full.a), full.b - span);
+    return { a: a, b: a + span };
+  }
+  function renderChart(name, reset) {
     var wrap = $("chartWrap"), h = history[name] || [];
-    if (!h.length) { wrap.innerHTML = '<div class="empty">Complete a workout to see progress</div>'; return; }
-    var W = 320, H = 190, pl = 38, pr = 12, pt = 12, pb = 26;
-    var ws = h.map(function (e) { return e.weight; });
-    var lo = Math.min.apply(null, ws), hi = Math.max.apply(null, ws);
-    if (lo === hi) { lo -= 5; hi += 5; }
-    var pad = (hi - lo) * 0.1; lo = Math.max(0, lo - pad); hi += pad;
-    function x(i) { return h.length === 1 ? (pl + (W - pl - pr) / 2) : pl + i * (W - pl - pr) / (h.length - 1); }
-    function y(v) { return pt + (hi - v) * (H - pt - pb) / (hi - lo); }
-    var s = '<svg id="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Weight progress chart">';
-    for (var g = 0; g <= 3; g++) {
-      var v = lo + (hi - lo) * g / 3, yy = y(v);
-      s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + yy + '" y2="' + yy + '" stroke="#3a4150" stroke-width="1" opacity=".6"/>';
-      s += '<text x="' + (pl - 6) + '" y="' + (yy + 4) + '" fill="#8b93a3" font-size="10" text-anchor="end">' + Math.round(v) + '</text>';
+    if (reset || name !== chartName) {
+      chartName = name;
+      if (h.length) {
+        var ts = h.map(function (e) { return toT(e.date); }), lo = Math.min.apply(null, ts), hi = Math.max.apply(null, ts);
+        var pad = lo === hi ? 7 * DAY : (hi - lo) * 0.05;
+        full = { a: lo - pad, b: hi + pad }; view = { a: full.a, b: full.b };
+      }
     }
-    var pts = h.map(function (e, i) { return x(i) + "," + y(e.weight); }).join(" ");
+    $("zoomReset").classList.toggle("hidden", !h.length || (view.b - view.a) >= (full.b - full.a) - 1);
+    if (!h.length) { wrap.innerHTML = '<div class="empty">Complete a workout to see progress</div>'; return; }
+
+    var W = plotW(), H = CH.H, pl = CH.pl, pr = CH.pr, pt = CH.pt, pb = CH.pb, pw = W - pl - pr;
+    var ws = h.map(function (e) { return e.weight; });
+    // y axis: bounds and ticks always on multiples of 5
+    var lo = Math.floor(Math.min.apply(null, ws) / 5) * 5, hi = Math.ceil(Math.max.apply(null, ws) / 5) * 5;
+    while (hi - lo < 10) { if (lo >= 5) lo -= 5; hi += 5; }
+    var step = 5 * Math.ceil((hi - lo) / 5 / 6);
+    function x(tm) { return pl + (tm - view.a) / (view.b - view.a) * pw; }
+    function y(v) { return pt + (hi - v) * (H - pt - pb) / (hi - lo); }
+    var s = '<svg id="chart" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Weight progress chart">';
+    s += '<defs><clipPath id="clip"><rect x="' + pl + '" y="0" width="' + pw + '" height="' + H + '"/></clipPath></defs>';
+    for (var v = lo; v <= hi; v += step) {
+      var yy = y(v);
+      s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + yy + '" y2="' + yy + '" stroke="#3a4150" stroke-width="1" opacity=".6"/>';
+      s += '<text x="' + (pl - 6) + '" y="' + (yy + 4) + '" fill="#8b93a3" font-size="10" text-anchor="end">' + v + '</text>';
+    }
+    // x ticks
+    var span = view.b - view.a, days = span / DAY, td = [1, 2, 7, 14, 30, 61, 91, 183, 365, 730].filter(function (d) { return days / d <= 5; })[0] || 730;
+    for (var tk = Math.ceil(view.a / (td * DAY)) * td * DAY; tk <= view.b; tk += td * DAY) {
+      var tx = x(tk);
+      s += '<line x1="' + tx + '" x2="' + tx + '" y1="' + pt + '" y2="' + (H - pb) + '" stroke="#3a4150" stroke-width="1" opacity=".3"/>';
+      s += '<text x="' + tx + '" y="' + (H - 6) + '" fill="#8b93a3" font-size="10" text-anchor="middle">' + xLabel(tk, td >= 30) + '</text>';
+    }
+    s += '<g clip-path="url(#clip)">';
+    var pts = h.map(function (e) { return x(toT(e.date)) + "," + y(e.weight); }).join(" ");
     if (h.length > 1) s += '<polyline points="' + pts + '" fill="none" stroke="#3ddc84" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
-    h.forEach(function (e, i) {
-      s += '<circle cx="' + x(i) + '" cy="' + y(e.weight) + '" r="4" fill="#3ddc84"/>';
-    });
-    var first = h[0].date.slice(5), last = h[h.length - 1].date.slice(5);
-    s += '<text x="' + pl + '" y="' + (H - 6) + '" fill="#8b93a3" font-size="10">' + first + '</text>';
-    if (h.length > 1) s += '<text x="' + (W - pr) + '" y="' + (H - 6) + '" fill="#8b93a3" font-size="10" text-anchor="end">' + last + '</text>';
+    h.forEach(function (e) { s += '<circle cx="' + x(toT(e.date)) + '" cy="' + y(e.weight) + '" r="4" fill="#3ddc84"/>'; });
+    s += "</g>";
     wrap.innerHTML = s + "</svg>";
   }
+
+  // pinch to zoom, drag to pan (pointer events on the wrapper so re-rendering the SVG doesn't drop the gesture)
+  (function () {
+    var wrap = $("chartWrap"), ptrs = {}, base = null;
+    function ids() { return Object.keys(ptrs); }
+    function frac(clientX) { return (clientX - wrap.getBoundingClientRect().left - CH.pl) / (plotW() - CH.pl - CH.pr); }
+    function startGesture() {
+      var k = ids(); if (!k.length || !full) { base = null; return; }
+      var p = ptrs[k[0]], q = ptrs[k[1]];
+      var mid = q ? (p + q) / 2 : p;
+      base = { view: { a: view.a, b: view.b }, dist: q ? Math.abs(p - q) : 0, mid: mid,
+               t: view.a + frac(mid) * (view.b - view.a) };
+    }
+    function apply() {
+      var k = ids(); if (!base) return;
+      var p = ptrs[k[0]], q = ptrs[k[1]], mid = q ? (p + q) / 2 : p, span = base.view.b - base.view.a;
+      if (q && base.dist > 10) span = span * base.dist / Math.max(10, Math.abs(p - q));
+      var f = (mid - wrap.getBoundingClientRect().left - CH.pl) / (plotW() - CH.pl - CH.pr);
+      view = clampView(base.t - f * span, span);
+      renderChart(chartName);
+    }
+    wrap.addEventListener("pointerdown", function (e) {
+      if (!full || !(history[chartName] || []).length) return;
+      ptrs[e.pointerId] = e.clientX; try { wrap.setPointerCapture(e.pointerId); } catch (x) {}
+      startGesture();
+    });
+    wrap.addEventListener("pointermove", function (e) {
+      if (!(e.pointerId in ptrs)) return;
+      ptrs[e.pointerId] = e.clientX; apply();
+    });
+    function end(e) { if (e.pointerId in ptrs) { delete ptrs[e.pointerId]; startGesture(); } }
+    wrap.addEventListener("pointerup", end); wrap.addEventListener("pointercancel", end);
+    wrap.addEventListener("wheel", function (e) {            // trackpad pinch / ctrl+scroll on desktop
+      if (!e.ctrlKey || !full) return;
+      e.preventDefault();
+      var f = frac(e.clientX), span = view.b - view.a, t = view.a + f * span;
+      var ns = span * Math.exp(e.deltaY * 0.01);
+      view = clampView(t - f * ns, ns); renderChart(chartName);
+    }, { passive: false });
+    $("zoomReset").addEventListener("click", function () { renderChart(chartName, true); });
+    window.addEventListener("resize", function () { if (chartName) renderChart(chartName); });
+  })();
 
   /* ---------- timer + alert ---------- */
   var audioCtx = null, timerStart = null, timerFired = false, tick = null;
@@ -345,7 +422,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
       s.recorded = true;
       (history[current] = history[current] || []).push({ date: today(), weight: w });
       save(KEY_HISTORY, history);
-      renderChart(current);
+      renderChart(current, true);
       stopTimer();
     }
     save(KEY_SESSION, session);
@@ -360,7 +437,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
     })()) || "";
     $("weight").classList.remove("need");
     renderPlates();
-    stopTimer(); renderChart(name); renderSets();
+    stopTimer(); renderChart(name, true); renderSets();
     $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
     window.scrollTo(0, 0);
   }
