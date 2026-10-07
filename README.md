@@ -9,6 +9,7 @@ A simple single-page workout tracker for iPhone (no build step, no dependencies)
 - Graph: y axis ticks are multiples of 5 lbs; x axis is a real date axis you can pinch to zoom and drag to pan (Reset zoom button)
 - Weight moves in 5 lb steps (− / + buttons; typed values snap to the nearest 5) and a plate diagram shows plates per side on a 45 lb bar (45, 25, 15, 10, 5, 2.5)
 - Home → "Import / export data": paste `exercise, date, weight` lines to load past workouts, or export a backup
+- Home → "+ Add workout" creates a custom lift with the same layout (graph, weight, plates, 5 set boxes, timer); custom lifts can be removed from their own screen
 - Storage: asks the browser for persistent storage, mirrors data to IndexedDB (auto-restores if localStorage is cleared), and "Save backup file" shares a CSV backup
 
 ## Run / install on iPhone

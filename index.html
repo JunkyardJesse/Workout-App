@@ -30,6 +30,14 @@ button { font: inherit; color: inherit; }
 .tile .name { font-size: 14px; font-weight: 700; }
 .tile .best { font-size: 10px; color: var(--muted); }
 
+/* Add workout */
+.tile.add { background: transparent; border: 1.5px dashed var(--line); }
+.tile.add .name { color: var(--accent); }
+.field { width: 100%; background: var(--card2); color: var(--text); border: 1.5px solid transparent; border-radius: 9px; padding: 9px 10px; font-size: 16px; }
+.field:focus { outline: none; border-color: var(--accent); }
+.check { display: flex; align-items: center; gap: 8px; margin-top: 9px; font-size: 12px; color: var(--muted); }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
 /* Data */
 .link { display: block; margin: 18px auto 0; background: none; border: 0; color: var(--muted); font-size: 10.5px; padding: 7.5px; cursor: pointer; }
 textarea { width: 100%; min-height: 135px; background: var(--card2); color: var(--text); border: 1.5px solid transparent; border-radius: 9px;
@@ -87,6 +95,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
 <section id="home">
   <h1>Lift Log</h1>
   <div class="grid" id="tiles"></div>
+  <div class="panel hidden" id="addPanel" style="margin-top:10.5px">
+    <h2>New workout</h2>
+    <input id="addName" class="field" type="text" maxlength="30" placeholder="e.g. Barbell Row" autocapitalize="words" autocomplete="off">
+    <label class="check"><input type="checkbox" id="addBarbell" checked> Uses a barbell (show plate diagram)</label>
+    <div class="msg" id="addMsg" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:8px"><button class="primary" id="addGo">Add</button><button class="ghost" id="addCancel">Cancel</button></div>
+  </div>
   <button class="link" id="toData">Import / export data</button>
 </section>
 
@@ -150,6 +165,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   </div>
 
   <div class="row"><button class="ghost" id="reset">Reset sets</button></div>
+  <button class="link hidden" id="removeBtn">Remove this workout</button>
 </section>
 
 <div class="banner hidden" id="banner">⏰ 3 minutes — time for your next set!</div>
@@ -157,9 +173,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
 <script>
 (function () {
   "use strict";
-  var EXERCISES = ["Bench Press", "Squat", "Deadlift", "Overhead Press", "Dumbbell Rows"];
+  var BUILTIN = ["Bench Press", "Squat", "Deadlift", "Overhead Press", "Dumbbell Rows"];
+  var EXERCISES = BUILTIN.slice();   // built-ins + custom workouts
   var SETS = 5, REPS = 5, ALERT_MS = 3 * 60 * 1000;
-  var KEY_HISTORY = "liftlog.history.v1", KEY_SESSION = "liftlog.session.v1";
+  var KEY_HISTORY = "liftlog.history.v1", KEY_SESSION = "liftlog.session.v1", KEY_CUSTOM = "liftlog.custom.v1";
 
   /* ---------- storage (localStorage, wrapped for private mode) ---------- */
   function load(key, fallback) {
@@ -201,13 +218,23 @@ textarea:focus { outline: none; border-color: var(--accent); }
   requestPersistence();
   var history = load(KEY_HISTORY, {});   // { name: [{date, weight}] }
   var session = load(KEY_SESSION, {});   // { name: {weight, counts[], recorded} }
+  var custom = load(KEY_CUSTOM, []);     // [{ name, barbell }] user-added workouts
+  function syncExercises() { EXERCISES = BUILTIN.concat(custom.map(function (c) { return c.name; })); }
+  syncExercises();
+  function isCustom(name) { return custom.some(function (c) { return c.name === name; }); }
+  function hasBarbell(name) {
+    if (name === "Dumbbell Rows") return false;
+    for (var i = 0; i < custom.length; i++) if (custom[i].name === name) return custom[i].barbell !== false;
+    return true;
+  }
 
   function restoreFromMirror() {
     [[KEY_HISTORY, function (v) { history = v; }, function () { return Object.keys(history).length; }],
-     [KEY_SESSION, function (v) { session = v; }, function () { return Object.keys(session).length; }]
+     [KEY_SESSION, function (v) { session = v; }, function () { return Object.keys(session).length; }],
+     [KEY_CUSTOM, function (v) { custom = v; syncExercises(); }, function () { return custom.length; }]
     ].forEach(function (k) {
       if (k[2]()) return;
-      idbGet(k[0], function (v) { if (v && Object.keys(v).length && !k[2]()) { k[1](v); save(k[0], v); if (typeof route === "function") route(); } });
+      idbGet(k[0], function (v) { if (v && (Array.isArray(v) ? v.length : Object.keys(v).length) && !k[2]()) { k[1](v); save(k[0], v); if (typeof route === "function") route(); } });
     });
   }
 
@@ -243,7 +270,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   }
   function renderPlates() {
     var w = snap($("weight").value), wrap = $("plateWrap"), cap = $("plateCap");
-    if (current === "Dumbbell Rows") { $("platePanel").classList.add("hidden"); return; }
+    if (!hasBarbell(current)) { $("platePanel").classList.add("hidden"); return; }
     $("platePanel").classList.remove("hidden");
     if (!w) { wrap.innerHTML = ""; cap.textContent = "Enter a weight"; return; }
     var ps = w >= BAR ? platesFor(w) : [], H = 100, W = 140, cy = H / 2, x = 10;
@@ -286,6 +313,39 @@ textarea:focus { outline: none; border-color: var(--accent); }
       b.addEventListener("click", function () { location.hash = "#/" + encodeURIComponent(name); });
       el.appendChild(b);
     });
+    var add = document.createElement("button");
+    add.className = "tile add"; add.id = "addTile";
+    add.innerHTML = '<span class="name">+ Add workout</span><span class="best">Same layout as the others</span>';
+    add.addEventListener("click", function () { openAdd(); });
+    el.appendChild(add);
+  }
+
+  /* ---------- add / remove custom workouts ---------- */
+  function key(s) { return s.toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function openAdd() {
+    $("addPanel").classList.remove("hidden"); $("addMsg").textContent = "";
+    $("addName").value = ""; $("addBarbell").checked = true; $("addName").focus();
+    $("addPanel").scrollIntoView({ block: "nearest" });
+  }
+  function closeAdd() { $("addPanel").classList.add("hidden"); }
+  function doAdd() {
+    var name = $("addName").value.replace(/\s+/g, " ").trim();
+    if (!name) { $("addMsg").textContent = "Enter a name."; return; }
+    if (name.length > 30) { $("addMsg").textContent = "Keep it under 30 characters."; return; }
+    if (!key(name) || key(name) === "data" || EXERCISES.some(function (n) { return key(n) === key(name); })) {
+      $("addMsg").textContent = "That name is already used."; return;
+    }
+    custom.push({ name: name, barbell: $("addBarbell").checked });
+    save(KEY_CUSTOM, custom); syncExercises(); closeAdd(); renderHome();
+  }
+  function removeCurrent() {
+    var name = current;
+    if (!isCustom(name)) return;
+    if (!confirm("Remove “" + name + "” and its saved history? This can't be undone.")) return;
+    custom = custom.filter(function (c) { return c.name !== name; });
+    delete history[name]; delete session[name];
+    save(KEY_CUSTOM, custom); save(KEY_HISTORY, history); save(KEY_SESSION, session);
+    syncExercises(); location.hash = "#/";
   }
 
   /* ---------- chart (inline SVG, time axis, pinch/drag) ---------- */
@@ -492,6 +552,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
     $("weight").classList.remove("need");
     // show the screen first so the chart can measure its real width
     $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
+    $("removeBtn").classList.toggle("hidden", !isCustom(name));
     renderPlates();
     stopTimer(); renderChart(name, true); renderSets();
     window.scrollTo(0, 0);
@@ -514,7 +575,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
       shoulderpress: "Overhead Press", militarypress: "Overhead Press",
       dumbbellrows: "Dumbbell Rows", dumbellrows: "Dumbbell Rows", dumbbellrow: "Dumbbell Rows",
       dumbellrow: "Dumbbell Rows", rows: "Dumbbell Rows", row: "Dumbbell Rows" };
-    return map[k] || null;
+    if (map[k]) return map[k];
+    for (var i = 0; i < custom.length; i++) if (key(custom[i].name) === key(s)) return custom[i].name;
+    return null;
   }
   function normDate(s) {
     s = s.trim(); var m;
@@ -588,6 +651,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
   $("doImport").addEventListener("click", doImport);
   $("doExport").addEventListener("click", doExport);
   $("doBackup").addEventListener("click", doBackupFile);
+  $("addGo").addEventListener("click", doAdd);
+  $("addCancel").addEventListener("click", closeAdd);
+  $("addName").addEventListener("keydown", function (e) { if (e.key === "Enter") doAdd(); });
+  $("removeBtn").addEventListener("click", removeCurrent);
 
   /* ---------- routing ---------- */
   function route() {
@@ -600,7 +667,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
     } else if (name && EXERCISES.indexOf(name) !== -1) { openExercise(name); }
     else {
       stopTimer(); current = null;
-      renderHome();
+      renderHome(); closeAdd();
       $("detail").classList.add("hidden"); $("home").classList.remove("hidden");
     }
   }
