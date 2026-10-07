@@ -30,6 +30,15 @@ button { font: inherit; color: inherit; }
 .tile .name { font-size: 19px; font-weight: 700; }
 .tile .best { font-size: 13px; color: var(--muted); }
 
+/* Data */
+.link { display: block; margin: 24px auto 0; background: none; border: 0; color: var(--muted); font-size: 14px; padding: 10px; cursor: pointer; }
+textarea { width: 100%; min-height: 180px; background: var(--card2); color: var(--text); border: 2px solid transparent; border-radius: 12px;
+  padding: 12px; font: 14px ui-monospace, Menlo, monospace; resize: vertical; }
+textarea:focus { outline: none; border-color: var(--accent); }
+.help { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+.primary { flex: 1; background: var(--accent); color: #07210f; border: 0; border-radius: 12px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.msg { margin-top: 12px; font-size: 14px; white-space: pre-line; }
+
 /* Detail */
 .top { display: flex; align-items: center; gap: 12px; margin: 16px 0 12px; }
 .back { background: var(--card); border: 0; border-radius: 10px; padding: 8px 14px; font-size: 16px; cursor: pointer; }
@@ -65,6 +74,26 @@ button { font: inherit; color: inherit; }
 <section id="home">
   <h1>Lift Log</h1>
   <div class="grid" id="tiles"></div>
+  <button class="link" id="toData">Import / export data</button>
+</section>
+
+<section id="data" class="hidden">
+  <div class="top">
+    <button class="back" id="backData">‹ Back</button>
+    <h1>Import / export</h1>
+  </div>
+  <div class="panel">
+    <h2>Paste history</h2>
+    <p class="help">One workout per line: <b>exercise, date, weight</b><br>
+      e.g. <code>Bench Press, 2026-01-05, 135</code> (dates as YYYY-MM-DD or M/D/YYYY). A header line is fine.
+      A line for a lift and date you already have replaces it.</p>
+    <textarea id="dataText" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Bench Press, 2026-01-05, 135&#10;Squat, 2026-01-05, 185"></textarea>
+    <div class="msg" id="dataMsg"></div>
+  </div>
+  <div class="row">
+    <button class="primary" id="doImport">Import</button>
+    <button class="ghost" id="doExport">Export current</button>
+  </div>
 </section>
 
 <section id="detail" class="hidden">
@@ -288,10 +317,73 @@ button { font: inherit; color: inherit; }
   });
   $("back").addEventListener("click", function () { location.hash = "#/"; });
 
+  /* ---------- import / export ---------- */
+  function normName(s) {
+    var k = s.toLowerCase().replace(/[^a-z]/g, "");
+    var map = { benchpress: "Bench Press", bench: "Bench Press", squat: "Squat", squats: "Squat",
+      deadlift: "Deadlift", deadlifts: "Deadlift", overheadpress: "Overhead Press", ohp: "Overhead Press",
+      shoulderpress: "Overhead Press", militarypress: "Overhead Press",
+      dumbbellrows: "Dumbbell Rows", dumbellrows: "Dumbbell Rows", dumbbellrow: "Dumbbell Rows",
+      dumbellrow: "Dumbbell Rows", rows: "Dumbbell Rows", row: "Dumbbell Rows" };
+    return map[k] || null;
+  }
+  function normDate(s) {
+    s = s.trim(); var m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return ymd(+m[1], +m[2], +m[3]);
+    if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/))) return ymd(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[1], +m[2]);
+    return null;
+  }
+  function ymd(y, mo, d) {
+    var dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    return y + "-" + ("0" + mo).slice(-2) + "-" + ("0" + d).slice(-2);
+  }
+  function doImport() {
+    var lines = $("dataText").value.split(/\r?\n/), ok = 0, bad = [];
+    lines.forEach(function (line, i) {
+      if (!line.trim()) return;
+      var parts = line.split(/[,\t;]/);
+      if (i === 0 && /exercise|lift|date|weight/i.test(line) && !/\d/.test(parts[parts.length - 1])) return;
+      var name = parts.length === 3 && normName(parts[0]);
+      var date = parts.length === 3 && normDate(parts[1]);
+      var w = parts.length === 3 && parseFloat(parts[2]);
+      if (!name || !date || !(w > 0)) { bad.push("Line " + (i + 1) + ": " + line.trim()); return; }
+      var h = history[name] = history[name] || [];
+      h = history[name] = h.filter(function (e) { return e.date !== date; });
+      h.push({ date: date, weight: w });
+      ok++;
+    });
+    EXERCISES.forEach(function (n) {
+      if (history[n]) history[n].sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    });
+    if (ok) save(KEY_HISTORY, history);
+    var msg = "Imported " + ok + " workout" + (ok === 1 ? "" : "s") + ".";
+    if (bad.length) msg += "\nSkipped " + bad.length + " line" + (bad.length === 1 ? "" : "s") + ":\n" + bad.slice(0, 8).join("\n") + (bad.length > 8 ? "\n…" : "");
+    $("dataMsg").textContent = msg;
+  }
+  function doExport() {
+    var out = ["exercise, date, weight"];
+    EXERCISES.forEach(function (n) {
+      (history[n] || []).forEach(function (e) { out.push(n + ", " + e.date + ", " + e.weight); });
+    });
+    var ta = $("dataText"); ta.value = out.join("\n");
+    $("dataMsg").textContent = out.length > 1 ? "Select all and copy to back up." : "Nothing to export yet.";
+    ta.focus(); ta.select();
+  }
+  $("toData").addEventListener("click", function () { location.hash = "#/data"; });
+  $("backData").addEventListener("click", function () { location.hash = "#/"; });
+  $("doImport").addEventListener("click", doImport);
+  $("doExport").addEventListener("click", doExport);
+
   /* ---------- routing ---------- */
   function route() {
     var m = location.hash.match(/^#\/(.+)$/), name = m && decodeURIComponent(m[1]);
-    if (name && EXERCISES.indexOf(name) !== -1) { openExercise(name); }
+    $("data").classList.add("hidden");
+    if (name === "data") {
+      stopTimer(); current = null;
+      $("detail").classList.add("hidden"); $("home").classList.add("hidden");
+      $("data").classList.remove("hidden"); $("dataMsg").textContent = ""; window.scrollTo(0, 0);
+    } else if (name && EXERCISES.indexOf(name) !== -1) { openExercise(name); }
     else {
       stopTimer(); current = null;
       renderHome();
