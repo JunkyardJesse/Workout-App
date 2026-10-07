@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lift Log</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lift Log">
+<meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="manifest.json">
+<style>
+:root {
+  --bg: #0f1115; --card: #1b1f27; --card2: #262b36; --text: #f2f4f8;
+  --muted: #8b93a3; --accent: #3ddc84; --warn: #ffb84d; --line: #3a4150;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; }
+body { padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px); max-width: 560px; margin: 0 auto; }
+h1 { font-size: 28px; margin: 20px 0 16px; }
+button { font: inherit; color: inherit; }
+.hidden { display: none !important; }
+
+/* Home */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tile { background: var(--card); border: 0; border-radius: 16px; padding: 22px 14px; min-height: 110px;
+  text-align: left; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; }
+.tile:active { background: var(--card2); }
+.tile .name { font-size: 19px; font-weight: 700; }
+.tile .best { font-size: 13px; color: var(--muted); }
+
+/* Detail */
+.top { display: flex; align-items: center; gap: 12px; margin: 16px 0 12px; }
+.back { background: var(--card); border: 0; border-radius: 10px; padding: 8px 14px; font-size: 16px; cursor: pointer; }
+.top h1 { margin: 0; font-size: 24px; }
+.panel { background: var(--card); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
+.panel h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+#chart { width: 100%; height: 190px; display: block; }
+.empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
+.weight { display: flex; align-items: center; gap: 10px; }
+.weight input { flex: 1; min-width: 0; background: var(--card2); border: 2px solid transparent; border-radius: 12px;
+  color: var(--text); font-size: 32px; font-weight: 700; padding: 10px 14px; text-align: center; }
+.weight input:focus { outline: none; border-color: var(--accent); }
+.weight input.need { border-color: var(--warn); }
+.weight .unit { color: var(--muted); font-size: 18px; }
+.sets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
+.box { aspect-ratio: 1; border-radius: 14px; border: 2px solid var(--line); background: var(--card);
+  font-size: 28px; font-weight: 800; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.box:active { transform: scale(.95); }
+.box.full { background: var(--accent); border-color: var(--accent); color: #07210f; }
+.timer { text-align: center; }
+.timer .time { font-size: 56px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.timer .sub { color: var(--muted); font-size: 14px; min-height: 18px; }
+.timer.done .time { color: var(--warn); }
+.status { text-align: center; font-weight: 700; color: var(--accent); min-height: 24px; margin-bottom: 8px; }
+.row { display: flex; gap: 10px; }
+.ghost { flex: 1; background: var(--card); border: 0; border-radius: 12px; padding: 12px; font-size: 15px; color: var(--muted); cursor: pointer; }
+.banner { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 10px); background: var(--warn); color: #231600;
+  font-weight: 800; text-align: center; padding: 16px; border-radius: 14px; z-index: 10; font-size: 18px; box-shadow: 0 6px 24px #0008; }
+</style>
+</head>
+<body>
+
+<section id="home">
+  <h1>Lift Log</h1>
+  <div class="grid" id="tiles"></div>
+</section>
+
+<section id="detail" class="hidden">
+  <div class="top">
+    <button class="back" id="back">‹ Back</button>
+    <h1 id="title"></h1>
+  </div>
+
+  <div class="panel">
+    <h2>Progress (lbs)</h2>
+    <div id="chartWrap"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Today's weight</h2>
+    <div class="weight">
+      <input id="weight" type="number" inputmode="decimal" min="0" step="any" placeholder="0">
+      <span class="unit">lbs</span>
+    </div>
+  </div>
+
+  <div class="sets" id="sets"></div>
+  <div class="status" id="status"></div>
+
+  <div class="panel timer" id="timerPanel">
+    <h2>Rest timer</h2>
+    <div class="time" id="time">0:00</div>
+    <div class="sub" id="timerSub">Tap a box to start</div>
+  </div>
+
+  <div class="row"><button class="ghost" id="reset">Reset sets</button></div>
+</section>
+
+<div class="banner hidden" id="banner">⏰ 3 minutes — time for your next set!</div>
+
+<script>
+(function () {
+  "use strict";
+  var EXERCISES = ["Bench Press", "Squat", "Deadlift", "Overhead Press", "Dumbbell Rows"];
+  var SETS = 5, REPS = 5, ALERT_MS = 3 * 60 * 1000;
+  var KEY_HISTORY = "liftlog.history.v1", KEY_SESSION = "liftlog.session.v1";
+
+  /* ---------- storage (localStorage, wrapped for private mode) ---------- */
+  function load(key, fallback) {
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+  }
+  function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+  var history = load(KEY_HISTORY, {});   // { name: [{date, weight}] }
+  var session = load(KEY_SESSION, {});   // { name: {weight, counts[], recorded} }
+
+  function sess(name) {
+    if (!session[name] || session[name].date !== today())
+      session[name] = { weight: "", counts: [0,0,0,0,0], recorded: false, date: today() };
+    return session[name];
+  }
+
+  /* ---------- helpers ---------- */
+  var $ = function (id) { return document.getElementById(id); };
+  function best(name) {
+    var h = history[name] || [];
+    return h.length ? Math.max.apply(null, h.map(function (e) { return e.weight; })) : null;
+  }
+  function fmt(ms) {
+    var s = Math.floor(ms / 1000), m = Math.floor(s / 60);
+    return m + ":" + ("0" + (s % 60)).slice(-2);
+  }
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + "-" + ("0" + (d.getMonth()+1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+
+  /* ---------- home ---------- */
+  function renderHome() {
+    var el = $("tiles"); el.innerHTML = "";
+    EXERCISES.forEach(function (name) {
+      var b = document.createElement("button");
+      b.className = "tile";
+      var n = best(name);
+      b.innerHTML = '<span class="name"></span><span class="best"></span>';
+      b.firstChild.textContent = name;
+      b.lastChild.textContent = n ? "Best: " + n + " lbs" : "No sessions yet";
+      b.addEventListener("click", function () { location.hash = "#/" + encodeURIComponent(name); });
+      el.appendChild(b);
+    });
+  }
+
+  /* ---------- chart (inline SVG) ---------- */
+  function renderChart(name) {
+    var wrap = $("chartWrap"), h = history[name] || [];
+    if (!h.length) { wrap.innerHTML = '<div class="empty">Complete a workout to see progress</div>'; return; }
+    var W = 320, H = 190, pl = 38, pr = 12, pt = 12, pb = 26;
+    var ws = h.map(function (e) { return e.weight; });
+    var lo = Math.min.apply(null, ws), hi = Math.max.apply(null, ws);
+    if (lo === hi) { lo -= 5; hi += 5; }
+    var pad = (hi - lo) * 0.1; lo = Math.max(0, lo - pad); hi += pad;
+    function x(i) { return h.length === 1 ? (pl + (W - pl - pr) / 2) : pl + i * (W - pl - pr) / (h.length - 1); }
+    function y(v) { return pt + (hi - v) * (H - pt - pb) / (hi - lo); }
+    var s = '<svg id="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Weight progress chart">';
+    for (var g = 0; g <= 3; g++) {
+      var v = lo + (hi - lo) * g / 3, yy = y(v);
+      s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + yy + '" y2="' + yy + '" stroke="#3a4150" stroke-width="1" opacity=".6"/>';
+      s += '<text x="' + (pl - 6) + '" y="' + (yy + 4) + '" fill="#8b93a3" font-size="10" text-anchor="end">' + Math.round(v) + '</text>';
+    }
+    var pts = h.map(function (e, i) { return x(i) + "," + y(e.weight); }).join(" ");
+    if (h.length > 1) s += '<polyline points="' + pts + '" fill="none" stroke="#3ddc84" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+    h.forEach(function (e, i) {
+      s += '<circle cx="' + x(i) + '" cy="' + y(e.weight) + '" r="4" fill="#3ddc84"/>';
+    });
+    var first = h[0].date.slice(5), last = h[h.length - 1].date.slice(5);
+    s += '<text x="' + pl + '" y="' + (H - 6) + '" fill="#8b93a3" font-size="10">' + first + '</text>';
+    if (h.length > 1) s += '<text x="' + (W - pr) + '" y="' + (H - 6) + '" fill="#8b93a3" font-size="10" text-anchor="end">' + last + '</text>';
+    wrap.innerHTML = s + "</svg>";
+  }
+
+  /* ---------- timer + alert ---------- */
+  var audioCtx = null, timerStart = null, timerFired = false, tick = null;
+  function unlockAudio() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!audioCtx && AC) audioCtx = new AC();
+      if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) {}
+  }
+  function beep() {
+    if (!audioCtx) return;
+    [0, 0.35, 0.7].forEach(function (t) {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      o.connect(g); g.connect(audioCtx.destination);
+      var now = audioCtx.currentTime + t;
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.6, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+      o.start(now); o.stop(now + 0.3);
+    });
+  }
+  function alertUser() {
+    beep();
+    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]); } catch (e) {}
+    var b = $("banner"); b.classList.remove("hidden");
+    setTimeout(function () { b.classList.add("hidden"); }, 8000);
+  }
+  function startTimer() {
+    timerStart = Date.now(); timerFired = false;
+    $("timerPanel").classList.remove("done");
+    if (!tick) tick = setInterval(updateTimer, 250);
+    updateTimer();
+  }
+  function stopTimer() {
+    clearInterval(tick); tick = null; timerStart = null; timerFired = false;
+    $("time").textContent = "0:00"; $("timerSub").textContent = "Tap a box to start";
+    $("timerPanel").classList.remove("done"); $("banner").classList.add("hidden");
+  }
+  function updateTimer() {
+    if (timerStart === null) return;
+    var el = Date.now() - timerStart;
+    $("time").textContent = fmt(el);
+    if (el >= ALERT_MS) {
+      if (!timerFired) { timerFired = true; $("timerPanel").classList.add("done"); alertUser(); }
+      $("timerSub").textContent = "Rest complete — ready for next set";
+    } else {
+      $("timerSub").textContent = "Alert at 3:00";
+    }
+  }
+  // iOS pauses timers in the background; catch up as soon as the app returns.
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) updateTimer(); });
+
+  /* ---------- detail ---------- */
+  var current = null;
+  function renderSets() {
+    var s = sess(current), el = $("sets"); el.innerHTML = "";
+    s.counts.forEach(function (c, i) {
+      var b = document.createElement("button");
+      b.className = "box" + (c >= REPS ? " full" : "");
+      b.textContent = c;
+      b.setAttribute("aria-label", "Set " + (i + 1) + ", " + c + " of " + REPS + " reps");
+      b.addEventListener("click", function () { press(i); });
+      el.appendChild(b);
+    });
+    $("status").textContent = s.recorded ? "✓ Workout saved at " + s.weight + " lbs" : "";
+  }
+  function press(i) {
+    unlockAudio();
+    var s = sess(current), inp = $("weight");
+    var w = parseFloat(inp.value);
+    if (!(w > 0)) { inp.classList.add("need"); inp.focus(); return; }
+    inp.classList.remove("need");
+    s.weight = w;
+    if (s.counts[i] >= REPS) return;
+    s.counts[i]++;
+    startTimer();
+    if (!s.recorded && s.counts.every(function (c) { return c >= REPS; })) {
+      s.recorded = true;
+      (history[current] = history[current] || []).push({ date: today(), weight: w });
+      save(KEY_HISTORY, history);
+      renderChart(current);
+      stopTimer();
+    }
+    save(KEY_SESSION, session);
+    renderSets();
+  }
+  function openExercise(name) {
+    current = name;
+    $("title").textContent = name;
+    var s = sess(name);
+    $("weight").value = s.weight || (function () {
+      var h = history[name] || []; return h.length ? h[h.length - 1].weight : "";
+    })();
+    $("weight").classList.remove("need");
+    stopTimer(); renderChart(name); renderSets();
+    $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
+    window.scrollTo(0, 0);
+  }
+  $("weight").addEventListener("input", function () {
+    this.classList.remove("need");
+    var s = sess(current); if (!s.recorded) { s.weight = parseFloat(this.value) || ""; save(KEY_SESSION, session); }
+  });
+  $("reset").addEventListener("click", function () {
+    session[current] = { weight: $("weight").value, counts: [0,0,0,0,0], recorded: false, date: today() };
+    save(KEY_SESSION, session); stopTimer(); renderSets();
+  });
+  $("back").addEventListener("click", function () { location.hash = "#/"; });
+
+  /* ---------- routing ---------- */
+  function route() {
+    var m = location.hash.match(/^#\/(.+)$/), name = m && decodeURIComponent(m[1]);
+    if (name && EXERCISES.indexOf(name) !== -1) { openExercise(name); }
+    else {
+      stopTimer(); current = null;
+      renderHome();
+      $("detail").classList.add("hidden"); $("home").classList.remove("hidden");
+    }
+  }
+  window.addEventListener("hashchange", route);
+  route();
+})();
+</script>
+</body>
+</html>
