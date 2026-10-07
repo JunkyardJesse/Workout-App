@@ -107,6 +107,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
     <button class="primary" id="doImport">Import</button>
     <button class="ghost" id="doExport">Export current</button>
   </div>
+  <div class="row" style="margin-top:8px"><button class="ghost" id="doBackup">Save backup file</button></div>
+  <p class="help" id="storageStatus" style="margin-top:12px;text-align:center"></p>
 </section>
 
 <section id="detail" class="hidden">
@@ -163,9 +165,51 @@ textarea:focus { outline: none; border-color: var(--accent); }
   function load(key, fallback) {
     try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
   }
-  function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+  function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} idbSet(key, val); }
+
+  // Second copy in IndexedDB, restored if localStorage is ever found empty.
+  function idb(cb) {
+    try {
+      var r = indexedDB.open("liftlog", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
+      r.onsuccess = function () { cb(r.result); };
+      r.onerror = function () { cb(null); };
+    } catch (e) { cb(null); }
+  }
+  function idbSet(key, val) {
+    idb(function (db) { if (!db) return; try { db.transaction("kv", "readwrite").objectStore("kv").put(JSON.stringify(val), key); } catch (e) {} });
+  }
+  function idbGet(key, cb) {
+    idb(function (db) {
+      if (!db) return cb(null);
+      try {
+        var q = db.transaction("kv").objectStore("kv").get(key);
+        q.onsuccess = function () { try { cb(q.result ? JSON.parse(q.result) : null); } catch (e) { cb(null); } };
+        q.onerror = function () { cb(null); };
+      } catch (e) { cb(null); }
+    });
+  }
+  var persisted = null;   // true / false once the browser has answered
+  function requestPersistence() {
+    try {
+      if (!(navigator.storage && navigator.storage.persist)) { persisted = false; return; }
+      navigator.storage.persisted().then(function (already) {
+        return already || navigator.storage.persist();
+      }).then(function (ok) { persisted = !!ok; }, function () { persisted = false; });
+    } catch (e) { persisted = false; }
+  }
+  requestPersistence();
   var history = load(KEY_HISTORY, {});   // { name: [{date, weight}] }
   var session = load(KEY_SESSION, {});   // { name: {weight, counts[], recorded} }
+
+  function restoreFromMirror() {
+    [[KEY_HISTORY, function (v) { history = v; }, function () { return Object.keys(history).length; }],
+     [KEY_SESSION, function (v) { session = v; }, function () { return Object.keys(session).length; }]
+    ].forEach(function (k) {
+      if (k[2]()) return;
+      idbGet(k[0], function (v) { if (v && Object.keys(v).length && !k[2]()) { k[1](v); save(k[0], v); if (typeof route === "function") route(); } });
+    });
+  }
 
   function sess(name) {
     if (!session[name] || session[name].date !== today())
@@ -506,19 +550,44 @@ textarea:focus { outline: none; border-color: var(--accent); }
     if (bad.length) msg += "\nSkipped " + bad.length + " line" + (bad.length === 1 ? "" : "s") + ":\n" + bad.slice(0, 8).join("\n") + (bad.length > 8 ? "\n…" : "");
     $("dataMsg").textContent = msg;
   }
-  function doExport() {
+  function exportLines() {
     var out = ["exercise, date, weight"];
     EXERCISES.forEach(function (n) {
       (history[n] || []).forEach(function (e) { out.push(n + ", " + e.date + ", " + e.weight); });
     });
+    return out;
+  }
+  function doExport() {
+    var out = exportLines();
     var ta = $("dataText"); ta.value = out.join("\n");
     $("dataMsg").textContent = out.length > 1 ? "Select all and copy to back up." : "Nothing to export yet.";
     ta.focus(); ta.select();
+  }
+  function doBackupFile() {
+    var out = exportLines();
+    if (out.length < 2) { $("dataMsg").textContent = "Nothing to back up yet."; return; }
+    var text = out.join("\n"), name = "liftlog-backup-" + today() + ".csv";
+    try {
+      var file = new File([text], name, { type: "text/csv" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: "Lift Log backup" }).catch(function () {}); return;
+      }
+    } catch (e) {}
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function showStorageStatus() {
+    var el = $("storageStatus");
+    if (persisted === true) el.textContent = "✓ Storage protected: the browser agreed to keep your data.";
+    else if (persisted === false) el.textContent = "Storage isn't guaranteed. Back up now and then with “Save backup file”.";
+    else el.textContent = "";
   }
   $("toData").addEventListener("click", function () { location.hash = "#/data"; });
   $("backData").addEventListener("click", function () { location.hash = "#/"; });
   $("doImport").addEventListener("click", doImport);
   $("doExport").addEventListener("click", doExport);
+  $("doBackup").addEventListener("click", doBackupFile);
 
   /* ---------- routing ---------- */
   function route() {
@@ -527,7 +596,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
     if (name === "data") {
       stopTimer(); current = null;
       $("detail").classList.add("hidden"); $("home").classList.add("hidden");
-      $("data").classList.remove("hidden"); $("dataMsg").textContent = ""; window.scrollTo(0, 0);
+      $("data").classList.remove("hidden"); $("dataMsg").textContent = ""; showStorageStatus(); window.scrollTo(0, 0);
     } else if (name && EXERCISES.indexOf(name) !== -1) { openExercise(name); }
     else {
       stopTimer(); current = null;
@@ -537,6 +606,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   }
   window.addEventListener("hashchange", route);
   route();
+  restoreFromMirror();
 })();
 </script>
 </body>
