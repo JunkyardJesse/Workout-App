@@ -52,7 +52,14 @@ textarea:focus { outline: none; border-color: var(--accent); }
   color: var(--text); font-size: 32px; font-weight: 700; padding: 10px 14px; text-align: center; }
 .weight input:focus { outline: none; border-color: var(--accent); }
 .weight input.need { border-color: var(--warn); }
+.weight input::-webkit-inner-spin-button, .weight input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.weight input { -moz-appearance: textfield; }
 .weight .unit { color: var(--muted); font-size: 18px; }
+.step { background: var(--card2); border: 0; border-radius: 12px; width: 52px; height: 52px; font-size: 28px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+.step:active { background: var(--line); }
+.plates { margin-top: 12px; }
+.plates .cap { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; }
+#plateSvg { width: 100%; height: 150px; display: block; }
 .sets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
 .box { aspect-ratio: 1; border-radius: 14px; border: 2px solid var(--line); background: var(--card);
   font-size: 28px; font-weight: 800; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
@@ -110,9 +117,17 @@ textarea:focus { outline: none; border-color: var(--accent); }
   <div class="panel">
     <h2>Today's weight</h2>
     <div class="weight">
-      <input id="weight" type="number" inputmode="decimal" min="0" step="any" placeholder="0">
+      <button class="step" id="minus" aria-label="Decrease 5 lbs">−</button>
+      <input id="weight" type="number" inputmode="numeric" min="0" step="5" placeholder="0">
+      <button class="step" id="plus" aria-label="Increase 5 lbs">+</button>
       <span class="unit">lbs</span>
     </div>
+  </div>
+
+  <div class="panel plates" id="platePanel">
+    <h2>Plates per side</h2>
+    <div id="plateWrap"></div>
+    <div class="cap" id="plateCap"></div>
   </div>
 
   <div class="sets" id="sets"></div>
@@ -163,6 +178,47 @@ textarea:focus { outline: none; border-color: var(--accent); }
   function today() {
     var d = new Date();
     return d.getFullYear() + "-" + ("0" + (d.getMonth()+1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+
+  /* ---------- weight stepping + plate calculator ---------- */
+  var BAR = 45, PLATES = [45, 25, 15, 10, 5, 2.5];
+  var PLATE_STYLE = { 45: ["#e5484d", 128], 25: ["#3b82f6", 108], 15: ["#f5c542", 88], 10: ["#3ddc84", 70], 5: ["#e8ebf0", 54], 2.5: ["#9aa3b2", 42] };
+  function snap(v) { v = parseFloat(v); return v > 0 ? Math.round(v / 5) * 5 : 0; }
+  function platesFor(w) {
+    var rem = (w - BAR) / 2, out = [];
+    PLATES.forEach(function (p) { while (rem + 1e-9 >= p) { out.push(p); rem -= p; } });
+    return out;
+  }
+  function renderPlates() {
+    var w = snap($("weight").value), wrap = $("plateWrap"), cap = $("plateCap");
+    if (current === "Dumbbell Rows") { $("platePanel").classList.add("hidden"); return; }
+    $("platePanel").classList.remove("hidden");
+    if (!w) { wrap.innerHTML = ""; cap.textContent = "Enter a weight to see the plates"; return; }
+    var ps = w >= BAR ? platesFor(w) : [], H = 150, cy = H / 2, x = 14;
+    var s = '<svg id="plateSvg" viewBox="0 0 320 ' + H + '" role="img" aria-label="Plates on one side of the barbell">';
+    s += '<rect x="0" y="' + (cy - 7) + '" width="14" height="14" fill="#6b7383"/>';           // bar shaft stub
+    s += '<rect x="14" y="' + (cy - 5) + '" width="306" height="10" rx="2" fill="#8b93a3"/>';   // sleeve
+    ps.forEach(function (p) {
+      var st = PLATE_STYLE[p], h = st[1], pw = p >= 10 ? 20 : 14, x0 = x + 4;
+      s += '<rect x="' + x0 + '" y="' + (cy - h / 2) + '" width="' + pw + '" height="' + h + '" rx="4" fill="' + st[0] + '" stroke="#0f1115" stroke-width="1.5"/>';
+      s += '<text x="' + (x0 + pw / 2) + '" y="' + (cy + 4) + '" font-size="' + (p === 2.5 ? 8 : 11) + '" font-weight="800" fill="#0f1115" text-anchor="middle" transform="rotate(-90 ' + (x0 + pw / 2) + ' ' + cy + ')">' + p + '</text>';
+      x = x0 + pw;
+    });
+    wrap.innerHTML = s + "</svg>";
+    if (w < BAR) cap.textContent = "Below the " + BAR + " lb bar";
+    else if (!ps.length) cap.textContent = "Empty " + BAR + " lb bar";
+    else {
+      var side = (w - BAR) / 2;
+      var counts = {}; ps.forEach(function (p) { counts[p] = (counts[p] || 0) + 1; });
+      cap.textContent = side + " lbs per side: " + Object.keys(counts).map(Number).sort(function (a, b) { return b - a; })
+        .map(function (p) { return (counts[p] > 1 ? counts[p] + "×" : "") + p; }).join(" + ");
+    }
+  }
+  function setWeight(v) {
+    var w = snap(v), inp = $("weight");
+    inp.value = w || ""; inp.classList.remove("need");
+    var s = sess(current); if (!s.recorded) { s.weight = w || ""; save(KEY_SESSION, session); }
+    renderPlates();
   }
 
   /* ---------- home ---------- */
@@ -278,10 +334,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
   function press(i) {
     unlockAudio();
     var s = sess(current), inp = $("weight");
-    var w = parseFloat(inp.value);
+    var w = snap(inp.value);
     if (!(w > 0)) { inp.classList.add("need"); inp.focus(); return; }
     inp.classList.remove("need");
-    s.weight = w;
+    inp.value = w; s.weight = w;
     if (s.counts[i] >= REPS) return;
     s.counts[i]++;
     startTimer();
@@ -299,20 +355,21 @@ textarea:focus { outline: none; border-color: var(--accent); }
     current = name;
     $("title").textContent = name;
     var s = sess(name);
-    $("weight").value = s.weight || (function () {
+    $("weight").value = snap(s.weight || (function () {
       var h = history[name] || []; return h.length ? h[h.length - 1].weight : "";
-    })();
+    })()) || "";
     $("weight").classList.remove("need");
+    renderPlates();
     stopTimer(); renderChart(name); renderSets();
     $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
     window.scrollTo(0, 0);
   }
-  $("weight").addEventListener("input", function () {
-    this.classList.remove("need");
-    var s = sess(current); if (!s.recorded) { s.weight = parseFloat(this.value) || ""; save(KEY_SESSION, session); }
-  });
+  $("weight").addEventListener("input", function () { this.classList.remove("need"); renderPlates(); });
+  $("weight").addEventListener("change", function () { setWeight(this.value); });
+  $("minus").addEventListener("click", function () { setWeight(Math.max(0, snap($("weight").value) - 5)); });
+  $("plus").addEventListener("click", function () { setWeight(snap($("weight").value) + 5); });
   $("reset").addEventListener("click", function () {
-    session[current] = { weight: $("weight").value, counts: [0,0,0,0,0], recorded: false, date: today() };
+    session[current] = { weight: snap($("weight").value) || "", counts: [0,0,0,0,0], recorded: false, date: today() };
     save(KEY_SESSION, session); stopTimer(); renderSets();
   });
   $("back").addEventListener("click", function () { location.hash = "#/"; });
