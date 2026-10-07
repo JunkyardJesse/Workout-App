@@ -338,7 +338,14 @@ textarea:focus { outline: none; border-color: var(--accent); }
       view = clampView(t - f * ns, ns); renderChart(chartName);
     }, { passive: false });
     $("zoomReset").addEventListener("click", function () { renderChart(chartName, true); });
-    window.addEventListener("resize", function () { if (chartName) renderChart(chartName); });
+    // redraw whenever the available width changes (screen shown, rotation, etc.)
+    var lastW = 0;
+    function widthChanged() {
+      var w = wrap.clientWidth;
+      if (w && w !== lastW && chartName && !$("detail").classList.contains("hidden")) { lastW = w; renderChart(chartName); }
+    }
+    if (window.ResizeObserver) new ResizeObserver(widthChanged).observe(wrap);
+    window.addEventListener("resize", widthChanged);
   })();
 
   /* ---------- timer + alert ---------- */
@@ -436,9 +443,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
       var h = history[name] || []; return h.length ? h[h.length - 1].weight : "";
     })()) || "";
     $("weight").classList.remove("need");
+    // show the screen first so the chart can measure its real width
+    $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
     renderPlates();
     stopTimer(); renderChart(name, true); renderSets();
-    $("home").classList.add("hidden"); $("detail").classList.remove("hidden");
     window.scrollTo(0, 0);
   }
   $("weight").addEventListener("input", function () { this.classList.remove("need"); renderPlates(); });
