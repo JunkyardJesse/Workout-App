@@ -28,6 +28,7 @@ button { font: inherit; color: inherit; }
   text-align: left; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; }
 .tile:active { background: var(--card2); }
 .tile .name { font-size: 14px; font-weight: 700; }
+.tile .stats { display: flex; flex-direction: column; gap: 2px; }
 .tile .best { font-size: 10px; color: var(--muted); }
 
 /* Add workout */
@@ -250,6 +251,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
     var h = history[name] || [];
     return h.length ? Math.max.apply(null, h.map(function (e) { return e.weight; })) : null;
   }
+  function last(name) {
+    var h = history[name] || [];
+    return h.length ? h[h.length - 1].weight : null;
+  }
   function fmt(ms) {
     var s = Math.floor(ms / 1000), m = Math.floor(s / 60);
     return m + ":" + ("0" + (s % 60)).slice(-2);
@@ -306,10 +311,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
     EXERCISES.forEach(function (name) {
       var b = document.createElement("button");
       b.className = "tile";
-      var n = best(name);
-      b.innerHTML = '<span class="name"></span><span class="best"></span>';
+      var n = best(name), l = last(name);
+      b.innerHTML = '<span class="name"></span><span class="stats"><span class="best"></span><span class="best"></span></span>';
       b.firstChild.textContent = name;
-      b.lastChild.textContent = n ? "Best: " + n + " lbs" : "No sessions yet";
+      var st = b.lastChild.children;
+      st[0].textContent = n ? "Last: " + l + " lbs" : "No sessions yet";
+      st[1].textContent = n ? "Best: " + n + " lbs" : "";
+      if (!n) st[1].remove();
       b.addEventListener("click", function () { location.hash = "#/" + encodeURIComponent(name); });
       el.appendChild(b);
     });
