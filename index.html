@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Lift Log">
 <meta name="theme-color" content="#0f1115">
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <style>
 :root {
   --bg: #0f1115; --card: #1b1f27; --card2: #262b36; --text: #f2f4f8;
@@ -171,9 +172,12 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 <div class="banner hidden" id="banner">⏰ 3 minutes — time for your next set!</div>
 
+<script src="native.js"></script>
 <script>
 (function () {
   "use strict";
+  var NA = window.NativeApp || { isNative: false, scheduleRestAlert: function () {}, cancelRestAlert: function () {},
+    tap: function () {}, buzz: function () {}, shareTextFile: function () { return Promise.resolve(false); } };
   var BUILTIN = ["Bench Press", "Squat", "Deadlift", "Overhead Press", "Dumbbell Rows"];
   var EXERCISES = BUILTIN.slice();   // built-ins + custom workouts
   var SETS = 5, REPS = 5, ALERT_MS = 3 * 60 * 1000;
@@ -487,17 +491,20 @@ textarea:focus { outline: none; border-color: var(--accent); }
   }
   function alertUser() {
     beep();
-    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]); } catch (e) {}
+    if (NA.isNative) NA.buzz();
+    else try { if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]); } catch (e) {}
     var b = $("banner"); b.classList.remove("hidden");
     setTimeout(function () { b.classList.add("hidden"); }, 8000);
   }
   function startTimer() {
     timerStart = Date.now(); timerFired = false;
+    NA.scheduleRestAlert(timerStart + ALERT_MS);   // app version: alert even when the phone is locked
     $("timerPanel").classList.remove("done");
     if (!tick) tick = setInterval(updateTimer, 250);
     updateTimer();
   }
   function stopTimer() {
+    if (timerStart !== null) NA.cancelRestAlert();
     clearInterval(tick); tick = null; timerStart = null; timerFired = false;
     $("time").textContent = "0:00"; $("timerSub").textContent = "Tap a box to start";
     $("timerPanel").classList.remove("done"); $("banner").classList.add("hidden");
@@ -539,6 +546,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
     inp.value = w; s.weight = w;
     if (s.counts[i] >= REPS) return;
     s.counts[i]++;
+    NA.tap();
     startTimer();
     if (!s.recorded && s.counts.every(function (c) { return c >= REPS; })) {
       s.recorded = true;
@@ -638,6 +646,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
     var out = exportLines();
     if (out.length < 2) { $("dataMsg").textContent = "Nothing to back up yet."; return; }
     var text = out.join("\n"), name = "liftlog-backup-" + today() + ".csv";
+    if (NA.isNative) {   // app version: write the file and open the share sheet
+      NA.shareTextFile(name, text, "Lift Log backup").catch(function () { $("dataMsg").textContent = "Couldn't create the backup file."; });
+      return;
+    }
     try {
       var file = new File([text], name, { type: "text/csv" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -650,7 +662,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
   }
   function showStorageStatus() {
     var el = $("storageStatus");
-    if (persisted === true) el.textContent = "✓ Storage protected: the browser agreed to keep your data.";
+    if (NA.isNative) el.textContent = "✓ Your data is stored on this device inside the app. Save a backup file before deleting the app.";
+    else if (persisted === true) el.textContent = "✓ Storage protected: the browser agreed to keep your data.";
     else if (persisted === false) el.textContent = "Storage isn't guaranteed. Back up now and then with “Save backup file”.";
     else el.textContent = "";
   }

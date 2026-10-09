@@ -1,0 +1,14 @@
+{
+  "appId": "com.junkyardjesse.liftlog",
+  "appName": "Lift Log",
+  "webDir": "www",
+  "backgroundColor": "#0f1115",
+  "ios": {
+    "contentInset": "never"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#3ddc84"
+    }
+  }
+}

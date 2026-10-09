@@ -18,3 +18,16 @@ Host the folder on any static host (e.g. GitHub Pages), open it in Safari, then 
 Locally: `python3 -m http.server 8000` and open http://localhost:8000.
 
 Notes: iOS Safari pauses timers and audio when the screen locks, so keep the app open; the timer catches up when you return. `navigator.vibrate` is not supported on iOS, so the alert there is sound + banner.
+
+## iOS and Android apps
+
+The same web app is packaged for the App Store and Google Play with [Capacitor](https://capacitorjs.com). The website keeps working as before; the app build copies the web files into `www/` and wraps them.
+
+- `capacitor.config.json` holds the app ID and name; `assets/` holds the app icon and splash screen sources.
+- `native.js` adds app-only features and does nothing in a normal browser.
+- `privacy.html` is the privacy policy that both stores ask for. Link it from GitHub Pages.
+- **GitHub Actions** (`.github/workflows/app-builds.yml`) builds both apps on every push, with no Mac needed. Download the Android test APK from the run's *Artifacts*. To make store builds, add the signing secrets listed at the top of the workflow, then run it from the Actions tab with **release** ticked.
+
+To build locally, run `npm install` and then `bash scripts/native-setup.sh all`. After that, `npx cap open ios` or `npx cap open android` opens the project. iOS needs a Mac with Xcode.
+
+In the app version, the rest timer also sends a notification at 3:00 when the phone is locked or the app is in the background, and the set boxes give haptic feedback.
